@@ -57,7 +57,7 @@ class OnnxService {
         // ----------------------------------------------------------------------------------------
 
         _isModelLoaded = true;
-        _statusMessage = 'Modelo ONNX cargado exitosamente en memoria local.';
+        _statusMessage = 'MODELO ONNX: ONLINE';
         debugPrint('ONNX_SERVICE: Modelo cargado con éxito. Listo para inferencia local.');
       } else {
         _isModelLoaded = false;

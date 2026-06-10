@@ -383,8 +383,9 @@ class _HomePageState extends State<HomePage> {
         Expanded(
           child: _buildTelemetryCard(
             title: 'MODELO ONNX',
-            value: _onnxModelLoaded ? 'ACTIVO' : 'FALLBACK',
+            value: _onnxModelLoaded ? 'ONLINE' : 'FALLBACK',
             isActive: _onnxModelLoaded,
+            statusColor: _onnxModelLoaded ? const Color(0xFF10B981) : Colors.red,
             colorGold: colorGold,
             colorGrey: colorGrey,
             description: _onnxStatus,
@@ -410,6 +411,7 @@ class _HomePageState extends State<HomePage> {
     required bool isActive,
     required Color colorGold,
     required Color colorGrey,
+    Color? statusColor,
     String? description,
   }) {
     return Container(
@@ -431,7 +433,7 @@ class _HomePageState extends State<HomePage> {
             children: [
               Icon(
                 Icons.circle,
-                color: isActive ? colorGold : Colors.red,
+                color: statusColor ?? (isActive ? colorGold : Colors.red),
                 size: 8,
               ),
               const SizedBox(width: 6),
