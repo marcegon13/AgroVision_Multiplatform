@@ -27,6 +27,10 @@ class _HomePageState extends State<HomePage> {
   final _caravanaController = TextEditingController(text: 'AR-70821-XP');
   final _loteController = TextEditingController(text: 'LOTE-A1-PATAGONIA');
   VideoPlayerController? _videoPlayerController;
+  double? _livePeso;
+  double? _liveCondicion;
+  double? _liveLlenado;
+  double? _lastFramePeso;
 
   @override
   void initState() {
@@ -107,35 +111,43 @@ class _HomePageState extends State<HomePage> {
 
     setState(() {
       _isLoading = true;
-      _processingProgress = 0.01;
     });
 
     try {
-      final videoPath = (_videoRepository as DeviceVideoRepository).selectedVideoPath;
-      Map<String, double> onnxResults;
+      double peso = _livePeso ?? 450.0;
+      double condicion = _liveCondicion ?? 3.5;
+      double llenado = _liveLlenado ?? 3.5;
 
-      if (videoPath != null && videoPath.toLowerCase().endsWith('.mp4')) {
-        onnxResults = await OnnxService.instance.procesarVideoBovino(
-          videoPath,
-          onProgress: (progress) {
-            setState(() {
-              _processingProgress = progress;
-            });
-          },
-        );
-      } else {
-        // Fallback: Ejecuta con features físicas base
-        final features = [138.0, 165.0, 142.0];
-        onnxResults = await OnnxService.instance.runInference(inputFeatures: features);
+      if (_livePeso == null) {
+        final videoPath = (_videoRepository as DeviceVideoRepository).selectedVideoPath;
+        Map<String, double> onnxResults;
+
+        if (videoPath != null && videoPath.toLowerCase().endsWith('.mp4')) {
+          onnxResults = await OnnxService.instance.procesarVideoBovino(
+            videoPath,
+            onProgress: (progress) {
+              setState(() {
+                _processingProgress = progress;
+              });
+            },
+          );
+        } else {
+          // Fallback: Ejecuta con features físicas base
+          final features = [138.0, 165.0, 142.0];
+          onnxResults = await OnnxService.instance.runInference(inputFeatures: features);
+        }
+        peso = onnxResults['peso_estimado']!;
+        condicion = onnxResults['condicion_corporal']!;
+        llenado = onnxResults['llenado_ruminal']!;
       }
 
       final nuevaDeteccion = Deteccion(
         caravanaId: _caravanaController.text.toUpperCase(),
         loteId: _loteController.text.toUpperCase(),
         timestamp: DateTime.now().toLocal().toString().substring(0, 19),
-        pesoEstimado: onnxResults['peso_estimado']!,
-        condicionCorporal: onnxResults['condicion_corporal']!,
-        llenadoRuminal: onnxResults['llenado_ruminal']!,
+        pesoEstimado: peso,
+        condicionCorporal: condicion,
+        llenadoRuminal: llenado,
         estado: 'PROCESADO',
       );
 
@@ -205,6 +217,10 @@ class _HomePageState extends State<HomePage> {
 
     setState(() {
       _videoProcessed = false;
+      _livePeso = null;
+      _liveCondicion = null;
+      _liveLlenado = null;
+      _lastFramePeso = null;
     });
 
     try {
@@ -217,13 +233,27 @@ class _HomePageState extends State<HomePage> {
       await controller.initialize();
       await controller.setLooping(false); // Reproduce una vez para gatillar el escaneo
       
+      int lastProcessedIndex = -1;
+      int frameCounter = 0;
+
       controller.addListener(() {
-        if (controller.value.isInitialized &&
-            controller.value.position >= controller.value.duration &&
-            !_videoProcessed &&
-            !_isLoading) {
+        if (!controller.value.isInitialized) return;
+
+        final positionMs = controller.value.position.inMilliseconds;
+        
+        // Procesar cada 300 ms de reproducción para dar fluidez al escaneo frame por frame
+        final int intervalIndex = positionMs ~/ 300;
+        
+        if (intervalIndex != lastProcessedIndex && controller.value.isPlaying) {
+          lastProcessedIndex = intervalIndex;
+          frameCounter++;
+          _procesarFotogramaEnVivo(frameCounter);
+        }
+
+        // Al finalizar el video, guardamos automáticamente el último animal si hay datos
+        if (positionMs >= controller.value.duration.inMilliseconds && !_videoProcessed && !_isLoading) {
           _videoProcessed = true;
-          _ejecutarInferenciaLocal();
+          _guardarAnimalActualAlFinalizar();
         }
       });
 
@@ -231,6 +261,97 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {
       debugPrint('Error al inicializar VideoPlayerController: $e');
     }
+  }
+
+  Future<void> _procesarFotogramaEnVivo(int frameIndex) async {
+    final videoPath = (_videoRepository as DeviceVideoRepository).selectedVideoPath;
+    if (videoPath == null) return;
+
+    try {
+      final results = await OnnxService.instance.procesarFrame(
+        frameIndex: frameIndex,
+        videoPath: videoPath,
+      );
+
+      final double peso = results['peso_estimado']!;
+      final double condicion = results['condicion_corporal']!;
+      final double llenado = results['llenado_ruminal']!;
+
+      // Detectar cambio drástico de animal (variación > 150 kg entre frames)
+      if (_lastFramePeso != null) {
+        final double diff = (peso - _lastFramePeso!).abs();
+        if (diff > 150.0) {
+          // Guardar el registro acumulado del animal anterior
+          await _guardarRegistroAutomatico(
+            caravana: _caravanaController.text,
+            peso: _lastFramePeso!,
+            condicion: _liveCondicion ?? condicion,
+            llenado: _liveLlenado ?? llenado,
+          );
+          
+          // Generar caravana del nuevo animal (ej. ternero)
+          _generarNuevaCaravana();
+        }
+      }
+
+      setState(() {
+        _livePeso = peso;
+        _liveCondicion = condicion;
+        _liveLlenado = llenado;
+        _lastFramePeso = peso;
+      });
+    } catch (e) {
+      debugPrint('Error procesando fotograma en vivo: $e');
+    }
+  }
+
+  Future<void> _guardarRegistroAutomatico({
+    required String caravana,
+    required double peso,
+    required double condicion,
+    required double llenado,
+  }) async {
+    try {
+      final nuevaDeteccion = Deteccion(
+        caravanaId: caravana.toUpperCase(),
+        loteId: _loteController.text.toUpperCase(),
+        timestamp: DateTime.now().toLocal().toString().substring(0, 19),
+        pesoEstimado: peso,
+        condicionCorporal: condicion,
+        llenadoRuminal: llenado,
+        estado: 'PROCESADO',
+      );
+
+      await DbHelper.instance.insertDeteccion(nuevaDeteccion);
+      await _loadDetecciones();
+      
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Guardado automático: $caravana ($peso kg)', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          backgroundColor: const Color(0xFFD4AF37),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error en guardado automático: $e');
+    }
+  }
+
+  Future<void> _guardarAnimalActualAlFinalizar() async {
+    if (_livePeso != null) {
+      await _guardarRegistroAutomatico(
+        caravana: _caravanaController.text,
+        peso: _livePeso!,
+        condicion: _liveCondicion ?? 3.5,
+        llenado: _liveLlenado ?? 3.5,
+      );
+    }
+    
+    setState(() {
+      _isLoading = false;
+      _processingProgress = 0.0;
+    });
   }
 
   Future<void> _conectarArchivoVideo() async {
@@ -273,6 +394,10 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _processingProgress = 0.0;
       _videoProcessed = false;
+      _livePeso = null;
+      _liveCondicion = null;
+      _liveLlenado = null;
+      _lastFramePeso = null;
     });
   }
 
@@ -633,17 +758,34 @@ class _HomePageState extends State<HomePage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        'PESO HISTORIAL',
-                        style: TextStyle(color: Color(0xFFD4AF37), fontSize: 8, fontWeight: FontWeight.bold),
+                      Text(
+                        _videoRepository.isStreaming ? 'ESCANEANDO EN VIVO' : 'PESO HISTORIAL',
+                        style: const TextStyle(color: Color(0xFFD4AF37), fontSize: 8, fontWeight: FontWeight.bold),
                       ),
                       Text(
-                        _detecciones.isNotEmpty ? '${_detecciones.first.pesoEstimado.toStringAsFixed(1)} kg' : '--',
+                        _videoRepository.isStreaming
+                            ? (_livePeso != null ? '${_livePeso!.toStringAsFixed(1)} kg' : '--')
+                            : (_detecciones.isNotEmpty ? '${_detecciones.first.pesoEstimado.toStringAsFixed(1)} kg' : '--'),
                         style: TextStyle(color: colorGold, fontSize: 10, fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
-                  if (_detecciones.isNotEmpty) ...[
+                  if (_videoRepository.isStreaming && _livePeso != null) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'COND: ${_liveCondicion!.toStringAsFixed(1)}/5',
+                          style: TextStyle(color: colorWhite, fontSize: 7, fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          'RUMEN: ${_liveLlenado!.toStringAsFixed(1)}/5',
+                          style: TextStyle(color: colorWhite, fontSize: 7, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ] else if (_detecciones.isNotEmpty) ...[
                     const SizedBox(height: 2),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
