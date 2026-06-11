@@ -90,8 +90,8 @@ workflows:
     publishing:
       email:
         recipients:
-          - marce@example.com
-          - estanislao@example.com
+          - marcegon13@gmail.com
+          - tano.ballan@gmail.com
         notify:
           success: true
           failure: true
