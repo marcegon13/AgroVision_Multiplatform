@@ -38,7 +38,7 @@ workflows:
       - name: Construir y actualizar Pods de iOS
         script: |
           find . -name "Podfile" -execdir pod install \;
-      - name: Compilar archivo IPA para distribución en TestFlight
+      - name: Compilar archivo IPA para distribución en TestFlight (Forzado en modo Release)
         script: |
           flutter build ipa --release \
             --workspace "$XCODE_WORKSPACE" \
