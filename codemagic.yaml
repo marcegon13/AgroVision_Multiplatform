@@ -21,7 +21,6 @@ workflows:
         - push
       branch_patterns:
         - pattern: main
-          target_type: primary
 
     scripts:
       - name: Inicializar llavero de firmas iOS
@@ -61,7 +60,6 @@ workflows:
         - push
       branch_patterns:
         - pattern: main
-          target_type: primary
 
     scripts:
       - name: Instalar dependencias de Flutter
