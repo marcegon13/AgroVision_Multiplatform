@@ -27,40 +27,27 @@ workflows:
       - name: Inicializar llavero de firmas iOS
         script: |
           keychain initialize
-      - name: Obtener certificados de aprovisionamiento de Apple
-        script: |
-          # Este paso descarga los perfiles de aprovisionamiento (Provisioning Profiles)
-          # y certificados cargados en Codemagic para firmar con TestFlight.
-          app-store-connect fetch-signing-files "com.agrovision.app" --project-id "$APP_STORE_CONNECT_PROJECT_ID" --install-profiles
       - name: Instalar dependencias de Flutter
         script: |
           flutter pub get
       - name: Construir y actualizar Pods de iOS
         script: |
           find . -name "Podfile" -execdir pod install \;
-      - name: Compilar archivo IPA para distribución en TestFlight (Forzado en modo Release)
+      - name: Compilar archivo iOS para distribución (no-codesign)
         script: |
-          flutter build ipa --release \
-            --workspace "$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME" \
-            --export-options-plist /Users/builder/export_options.plist
+          flutter build ios --release --no-codesign
 
     artifacts:
-      - build/ios/ipa/*.ipa
+      - build/ios/iphoneos/*.app
 
     publishing:
       email:
         recipients:
-          - marce@example.com # Reemplazar con el correo real de Marce
-          - estanislao@example.com # Correo de Estanislao
+          - marcegon13@gmail.com
+          - tano.ballan@gmail.com
         notify:
           success: true
           failure: true
-      app_store_connect:
-        api_key: $APP_STORE_CONNECT_API_KEY
-        key_id: $APP_STORE_CONNECT_KEY_ID
-        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-        submit_to_testflight: true # Sube el IPA directo a TestFlight de Apple
 
   android-workflow:
     name: AgroVision Android Release APK
